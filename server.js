@@ -12,7 +12,14 @@ const io = socketIo(server, {
 
 app.use(cors());
 app.use(express.json());
-app.use(express.static('public'));
+
+// Servir les fichiers statiques du dossier "public"
+app.use(express.static(path.join(__dirname, 'public')));
+
+// Route principale
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
 
 const games = new Map();
 
@@ -40,6 +47,7 @@ function sendQuestion(gameCode) {
     total: game.quiz.questions.length
   });
   
+  if (game.questionInterval) clearInterval(game.questionInterval);
   game.questionInterval = setInterval(() => {
     timeLeft--;
     io.to(gameCode).emit('timer_update', { timeLeft });
@@ -54,14 +62,14 @@ function nextQuestion(gameCode) {
   const game = games.get(gameCode);
   if (!game) return;
   game.currentQuestion++;
-  game.players.forEach(p => p.answered = false);
+  game.players.forEach(p => { p.answered = false; });
   sendQuestion(gameCode);
 }
 
 function endGame(gameCode) {
   const game = games.get(gameCode);
   if (!game) return;
-  clearInterval(game.questionInterval);
+  if (game.questionInterval) clearInterval(game.questionInterval);
   game.state = 'ended';
   const scores = game.players.map(p => ({ name: p.name, score: p.score })).sort((a,b) => b.score - a.score);
   io.to(gameCode).emit('game_ended', { scores });
@@ -69,38 +77,51 @@ function endGame(gameCode) {
 }
 
 io.on('connection', (socket) => {
-  console.log('Connecté:', socket.id);
+  console.log('🟢 Client connecté:', socket.id);
 
   socket.on('create_game', ({ quiz, hostName }) => {
     const code = generateCode();
     games.set(code, {
       code, quiz, host: socket.id, hostName,
       players: [], state: 'waiting', currentQuestion: 0,
-      scores: {}
+      scores: {}, questionInterval: null
     });
     socket.join(code);
     socket.emit('game_created', { gameCode: code });
+    console.log(`🎮 Partie créée: ${code}`);
   });
 
   socket.on('join_game', ({ gameCode, playerName }) => {
     const game = games.get(gameCode);
-    if (!game) return socket.emit('error', 'Code invalide');
-    if (game.state !== 'waiting') return socket.emit('error', 'Partie commencée');
+    if (!game) {
+      socket.emit('error', '❌ Code invalide');
+      return;
+    }
+    if (game.state !== 'waiting') {
+      socket.emit('error', '⏰ Partie déjà commencée');
+      return;
+    }
     
     game.players.push({ id: socket.id, name: playerName, score: 0, answered: false });
     socket.join(gameCode);
     socket.emit('joined', { gameCode, quizTitle: game.quiz.title });
     io.to(gameCode).emit('players_update', game.players.map(p => ({ name: p.name, score: p.score })));
+    console.log(`👤 ${playerName} a rejoint ${gameCode}`);
   });
 
   socket.on('start_game', ({ gameCode }) => {
     const game = games.get(gameCode);
     if (!game || game.host !== socket.id) return;
+    if (game.players.length === 0) {
+      socket.emit('error', '👥 Aucun joueur');
+      return;
+    }
     game.state = 'playing';
     game.currentQuestion = 0;
-    game.players.forEach(p => p.answered = false);
+    game.players.forEach(p => { p.answered = false; });
     io.to(gameCode).emit('game_started', { total: game.quiz.questions.length });
     sendQuestion(gameCode);
+    console.log(`🚀 Partie ${gameCode} démarrée`);
   });
 
   socket.on('next_question', ({ gameCode }) => {
@@ -121,7 +142,11 @@ io.on('connection', (socket) => {
     player.score += isCorrect ? 1000 : 0;
     player.answered = true;
     
-    socket.emit('answer_result', { correct: isCorrect, points: isCorrect ? 1000 : 0, correctAnswer: q.options[q.correct] });
+    socket.emit('answer_result', { 
+      correct: isCorrect, 
+      points: isCorrect ? 1000 : 0, 
+      correctAnswer: q.options[q.correct] 
+    });
     io.to(gameCode).emit('players_update', game.players.map(p => ({ name: p.name, score: p.score })));
   });
 
@@ -130,14 +155,19 @@ io.on('connection', (socket) => {
       if (game.host === socket.id) {
         io.to(code).emit('host_disconnected');
         games.delete(code);
+        console.log(`❌ Partie ${code} fermée`);
       }
     }
   });
 });
 
-app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
-});
-
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`✅ Serveur sur http://localhost:${PORT}`));
+server.listen(PORT, () => {
+  console.log(`
+  ╔════════════════════════════════╗
+  ║   🎯 QUIZ APP - DÉMARRÉE 🎯    ║
+  ╠════════════════════════════════╣
+  ║   Port: ${PORT}                  ║
+  ╚════════════════════════════════╝
+  `);
+});
