@@ -1,0 +1,14 @@
+{
+    "name": "quiz-app",
+    "version": "1.0.0",
+    "description": "Quiz multijoueur en temps réel",
+    "main": "server.js",
+    "scripts": {
+      "start": "node server.js"
+    },
+    "dependencies": {
+      "express": "^4.18.2",
+      "socket.io": "^4.6.1",
+      "cors": "^2.8.5"
+    }
+  }
