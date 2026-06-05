@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Quiz App - Multijoueur</title>
+    <script src="/socket.io/socket.io.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: system-ui, 'Segoe UI', sans-serif; }
+        body { background: linear-gradient(135deg, #8B0000 0%, #DC143C 50%, #FF6B6B 100%); min-height: 100vh; padding: 20px; color: white; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        .mode-bar { display: flex; gap: 15px; justify-content: center; margin-bottom: 30px; flex-wrap: wrap; }
+        .mode-btn { background: rgba(255,255,255,0.2); backdrop-filter: blur(10px); border: 2px solid rgba(255,255,255,0.3); padding: 14px 32px; border-radius: 60px; font-weight: 700; cursor: pointer; color: white; transition: 0.3s; }
+        .mode-btn.active { background: white; color: #DC143C; border-color: white; }
+        .card { background: rgba(255,255,255,0.95); backdrop-filter: blur(10px); border-radius: 32px; padding: 28px; margin-bottom: 24px; color: #2D2D2D; box-shadow: 0 20px 40px rgba(0,0,0,0.2); }
+        .card h2, .card h3 { color: #DC143C; margin-bottom: 16px; }
+        button { background: linear-gradient(135deg, #DC143C, #8B0000); border: none; padding: 12px 24px; border-radius: 50px; font-weight: 700; color: white; cursor: pointer; font-size: 1rem; transition: 0.2s; }
+        button:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(220,20,60,0.4); }
+        button.secondary { background: linear-gradient(135deg, #6B6B6B, #444); }
+        button.success { background: linear-gradient(135deg, #00C853, #009624); }
+        input { background: #F5F5F5; border: 2px solid #E0E0E0; border-radius: 20px; padding: 14px 18px; width: 100%; margin-bottom: 15px; font-size: 1rem; }
+        input:focus { outline: none; border-color: #DC143C; }
+        .quiz-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 20px; margin-top: 20px; }
+        .quiz-card { background: linear-gradient(135deg, #FFF5F5, #FFE0E0); border-radius: 24px; padding: 20px; cursor: pointer; transition: 0.3s; border: 2px solid rgba(220,20,60,0.2); }
+        .quiz-card:hover { transform: translateY(-5px); border-color: #DC143C; }
+        .chat-window { background: #F8F9FA; border-radius: 24px; height: 400px; display: flex; flex-direction: column; overflow: hidden; }
+        .chat-messages { flex: 1; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
+        .bot-msg, .user-msg { max-width: 80%; padding: 12px 18px; border-radius: 20px; font-size: 0.95rem; }
+        .bot-msg { background: #DC143C; color: white; align-self: flex-start; }
+        .user-msg { background: #E0E0E0; color: #2D2D2D; align-self: flex-end; }
+        .game-question { background: linear-gradient(135deg, #DC143C, #8B0000); border-radius: 32px; padding: 30px; text-align: center; color: white; }
+        .options-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; margin-top: 25px; }
+        .option-btn { background: rgba(255,255,255,0.2); backdrop-filter: blur(10px); padding: 18px; border-radius: 60px; font-weight: 700; cursor: pointer; transition: 0.2s; border: 2px solid rgba(255,255,255,0.3); }
+        .option-btn:hover { background: rgba(255,255,255,0.4); transform: scale(1.02); }
+        .timer-bar { height: 10px; background: rgba(255,255,255,0.5); width: 100%; border-radius: 10px; margin: 15px 0; overflow: hidden; }
+        .timer-fill { height: 100%; background: white; width: 100%; border-radius: 10px; transition: width 0.1s linear; }
+        .code-display { font-size: 2.5rem; letter-spacing: 12px; background: #DC143C; padding: 20px; border-radius: 20px; font-family: monospace; font-weight: bold; text-align: center; }
+        .player-list { background: #F0F0F0; border-radius: 20px; padding: 15px; margin-top: 15px; }
+        .player-item { padding: 8px; border-bottom: 1px solid #DDD; display: flex; justify-content: space-between; }
+        .correct-feedback { background: #00C853; color: white; padding: 15px; border-radius: 20px; margin-top: 15px; text-align: center; animation: bounce 0.5s; }
+        .wrong-feedback { background: #FF5252; color: white; padding: 15px; border-radius: 20px; margin-top: 15px; text-align: center; }
+        @keyframes bounce { 0%,100%{transform:scale(1)} 50%{transform:scale(1.05)} }
+        @media (max-width: 700px) { .options-grid { grid-template-columns: 1fr; } .code-display { font-size: 1.8rem; letter-spacing: 6px; } }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="mode-bar">
+        <button class="mode-btn active" id="btnHostMode">🎮 Organiser un quiz</button>
+        <button class="mode-btn" id="btnPlayerMode">📱 Rejoindre une partie</button>
+    </div>
+
+    <div id="hostPanel">
+        <div class="card">
+            <h2>✨ Créer un quiz</h2>
+            <div style="display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px;">
+                <button id="quickCreateBtn">⚡ Création rapide</button>
+                <button id="manualCreateBtn" class="secondary">📝 Manuel</button>
+                <button id="chatbotCreateBtn" class="secondary">🤖 Chatbot</button>
+            </div>
+            <h3>📚 Mes quiz</h3>
+            <div id="quizList" class="quiz-grid"></div>
+        </div>
+        <div id="hostGamePanel" class="card" style="display: none;">
+            <div id="hostRoomInfo"></div>
+            <div id="playersList" class="player-list"></div>
+            <div id="gameControls"></div>
+        </div>
+    </div>
+
+    <div id="playerPanel" style="display: none;">
+        <div class="card" id="playerJoinArea">
+            <h2>🔑 Rejoindre une partie</h2>
+            <input type="text" id="joinCode" placeholder="Code à 6 chiffres" maxlength="6">
+            <input type="text" id="playerName" placeholder="Votre pseudo">
+            <button id="joinRoomBtn">🎯 Rejoindre</button>
+        </div>
+        <div id="playerGameArea" class="card" style="display: none;">
+            <div id="gameStatus"></div>
+            <div id="questionArea"></div>
+            <div id="playerLeaderboard" class="player-list"></div>
+        </div>
+    </div>
+</div>
+
+<script>
+    let quizzes = JSON.parse(localStorage.getItem('quizapp_quizzes') || '[]');
+    function saveQuizzes() { localStorage.setItem('quizapp_quizzes', JSON.stringify(quizzes)); }
+    
+    function renderQuizList() {
+        const container = document.getElementById('quizList');
+        if (!container) return;
+        if (quizzes.length === 0) { container.innerHTML = '<p>Aucun quiz. Créez-en un !</p>'; return; }
+        container.innerHTML = quizzes.map((quiz, idx) => `
+            <div class="quiz-card">
+                <strong style="font-size:1.3rem; color:#DC143C;">${escapeHtml(quiz.title)}</strong>
+                <p style="margin:10px 0;">📋 ${quiz.questions.length} question(s)</p>
+                <button class="host-quiz-btn" data-idx="${idx}">🚀 Héberger</button>
+            </div>
+        `).join('');
+        document.querySelectorAll('.host-quiz-btn').forEach(btn => {
+            btn.addEventListener('click', () => startHostingQuiz(parseInt(btn.dataset.idx)));
+        });
+    }
+
+    function quickCreate() {
+        const theme = prompt("Thème du quiz ?", "Culture générale");
+        if (!theme) return;
+        let nb = parseInt(prompt("Nombre de questions (1-3)", "3"));
+        if (isNaN(nb)) nb = 3;
+        nb = Math.min(3, Math.max(1, nb));
+        const questions = [];
+        for (let i = 0; i < nb; i++) {
+            questions.push({
+                text: `Question ${i+1} sur ${theme} ?`,
+                options: [`Option A`, `Option B`, `Option C`, `Option D`],
+                correct: Math.floor(Math.random() * 4)
+            });
+        }
+        quizzes.push({ title: `Quiz ${theme}`, questions, id: Date.now() });
+        saveQuizzes();
+        renderQuizList();
+        alert(`✅ Quiz créé !`);
+    }
+
+    function openManualCreator() {
+        const modal = document.createElement('div');
+        modal.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.95);z-index:1000;display:flex;align-items:center;justify-content:center;overflow:auto;padding:20px;';
+        modal.innerHTML = `
+            <div class="card" style="max-width:700px;width:100%;max-height:90vh;overflow:auto;">
+                <h2>📝 Création manuelle</h2>
+                <input type="text" id="quizTitleManual" placeholder="Titre du quiz">
+                <div id="questionsManualContainer"></div>
+                <button id="addQuestionManualBtn">➕ Ajouter une question</button>
+                <div style="display:flex; gap:12px; justify-content:flex-end; margin-top:20px;">
+                    <button id="saveQuizManualBtn" class="success">✅ Sauvegarder</button>
+                    <button id="closeManualBtn" class="secondary">Annuler</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+        const container = document.getElementById('questionsManualContainer');
+        function addBlock() {
+            const block = document.createElement('div');
+            block.style.cssText = 'background:#F0F0F0;padding:15px;border-radius:20px;margin-bottom:15px;';
+            block.innerHTML = `
+                <input type="text" placeholder="Question" class="q-text"><br>
+                <input type="text" placeholder="Option A" class="opt0"><br>
+                <input type="text" placeholder="Option B" class="opt1"><br>
+                <input type="text" placeholder="Option C" class="opt2"><br>
+                <input type="text" placeholder="Option D" class="opt3"><br>
+                <select class="correct-select"><option value="0">Bonne : A</option><option value="1">Bonne : B</option><option value="2">Bonne : C</option><option value="3">Bonne : D</option></select><br>
+                <button class="remove-q-btn" style="background:#999;">🗑 Supprimer</button>
+            `;
+            block.querySelector('.remove-q-btn').onclick = () => block.remove();
+            container.appendChild(block);
+        }
+        addBlock();
+        document.getElementById('addQuestionManualBtn').onclick = addBlock;
+        document.getElementById('saveQuizManualBtn').onclick = () => {
+            const title = document.getElementById('quizTitleManual').value.trim();
+            if (!title) { alert('Titre requis'); return; }
+            const blocks = document.querySelectorAll('#questionsManualContainer .question-block, #questionsManualContainer > div');
+            const questions = [];
+            for (let b of blocks) {
+                const text = b.querySelector('.q-text')?.value.trim();
+                const opts = [b.querySelector('.opt0')?.value.trim(), b.querySelector('.opt1')?.value.trim(), b.querySelector('.opt2')?.value.trim(), b.querySelector('.opt3')?.value.trim()];
+                const correct = parseInt(b.querySelector('.correct-select')?.value);
+                if (!text || opts.some(o => !o)) { alert('Remplissez tout'); return; }
+                questions.push({ text, options: opts, correct });
+            }
+            if (questions.length === 0) { alert('Ajoutez une question'); return; }
+            quizzes.push({ title, questions, id: Date.now() });
+            saveQuizzes();
+            renderQuizList();
+            modal.remove();
+            alert('✅ Quiz créé !');
+        };
+        document.getElementById('closeManualBtn').onclick = () => modal.remove();
+    }
+
+    function openChatbot() {
+        const modal = document.createElement('div');
+        modal.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.95);z-index:1000;display:flex;align-items:center;justify-content:center;';
+        modal.innerHTML = `
+            <div class="card" style="width:90%;max-width:550px;">
+                <h2>🤖 Chatbot</h2>
+                <div class="chat-window">
+                    <div class="chat-messages" id="chatbotMsgs">
+                        <div class="bot-msg">🎯 Donne-moi un thème !</div>
+                    </div>
+                    <div style="display:flex; gap:8px; padding:12px;">
+                        <input type="text" id="chatbotInput" placeholder="Ex: Histoire, Foot, Cinéma..." style="margin:0;">
+                        <button id="sendChatbotMsg">OK</button>
+                    </div>
+                </div>
+                <button id="closeChatbotBtn" class="secondary" style="margin-top:16px;">Fermer</button>
+            </div>
+        `;
+        document.body.appendChild(modal);
+        const msgDiv = document.getElementById('chatbotMsgs');
+        const input = document.getElementById('chatbotInput');
+        function addBotMsg(txt) { const d = document.createElement('div'); d.className = 'bot-msg'; d.innerText = txt; msgDiv.appendChild(d); msgDiv.scrollTop = msgDiv.scrollHeight; }
+        function generateQuiz(theme) {
+            const questions = [];
+            for (let i = 0; i < 3; i++) {
+                questions.push({
+                    text: `Question ${i+1} sur "${theme}" ?`,
+                    options: [`Réponse 1`, `Réponse 2`, `Réponse 3`, `Réponse 4`],
+                    correct: Math.floor(Math.random() * 4)
+                });
+            }
+            quizzes.push({ title: `Quiz ${theme}`, questions, id: Date.now() });
+            saveQuizzes();
+            renderQuizList();
+            return `Quiz "${theme}" créé avec 3 questions !`;
+        }
+        function process() {
+            const val = input.value.trim();
+            if (!val) return;
+            const userDiv = document.createElement('div'); userDiv.className = 'user-msg'; userDiv.innerText = val; msgDiv.appendChild(userDiv);
+            const result = generateQuiz(val);
+            addBotMsg(result + " Va dans 'Mes quiz' pour l'héberger !");
+            setTimeout(() => modal.remove(), 2000);
+        }
+        document.getElementById('sendChatbotMsg').onclick = process;
+        input.addEventListener('keypress', (e) => { if (e.key === 'Enter') process(); });
+        document.getElementById('closeChatbotBtn').onclick = () => modal.remove();
+    }
+
+    const socket = io();
+    let currentRoom = null;
+    let isHost = false;
+
+    function startHostingQuiz(quizIndex) {
+        const quiz = quizzes[quizIndex];
+        if (!quiz) return;
+        const hostName = prompt("Votre pseudo :", "Organisateur");
+        if (!hostName) return;
+        socket.emit('create_game', { quiz, hostName });
+        socket.once('game_created', (data) => {
+            currentRoom = data.gameCode;
+            isHost = true;
+            document.getElementById('hostGamePanel').style.display = 'block';
+            document.getElementById('hostRoomInfo').innerHTML = `
+                <div style="text-align:center;">
+                    <p>🔑 Code :</p>
+                    <div class="code-display">${data.gameCode}</div>
+                    <button id="startGameBtn" class="success" style="margin-top:20px;">🚀 Démarrer</button>
+                </div>
+            `;
+            document.getElementById('startGameBtn').onclick = () => socket.emit('start_game', { gameCode: currentRoom });
+        });
+        socket.on('players_update', (players) => {
+            const container = document.getElementById('playersList');
+            if (container) container.innerHTML = `<h4>👥 Joueurs (${players.length})</h4>` + players.map(p => `<div class="player-item"><span>${escapeHtml(p.name)}</span><span>${p.score} pts</span></div>`).join('');
+        });
+        socket.on('game_started', () => { document.getElementById('hostRoomInfo').innerHTML = '<h3>🎮 Partie en cours !</h3>'; });
+        socket.on('new_question', (data) => {
+            document.getElementById('gameControls').innerHTML = `
+                <div class="game-question">
+                    <h3>Question ${data.qIndex}/${data.total}</h3>
+                    <h2>${escapeHtml(data.question)}</h2>
+                    <div class="timer-bar"><div class="timer-fill" style="width:100%"></div></div>
+                    <div class="options-grid">${data.options.map((o,i) => `<div class="option-btn">${String.fromCharCode(65+i)}. ${escapeHtml(o)}</div>`).join('')}</div>
+                    <button id="nextQBtn" style="margin-top:20px;">⏩ Question suivante</button>
+                </div>
+            `;
+            document.getElementById('nextQBtn').onclick = () => socket.emit('next_question', { gameCode: currentRoom });
+            let time = data.timeLimit;
+            const fill = document.querySelector('.timer-fill');
+            const interval = setInterval(() => { time--; if (fill) fill.style.width = `${(time/data.timeLimit)*100}%`; if (time <= 0) clearInterval(interval); }, 1000);
+        });
+        socket.on('game_ended', (data) => {
+            document.getElementById('gameControls').innerHTML = `<h2>🏆 Terminé !</h2>${data.scores.map(s => `<div class="player-item"><span>${escapeHtml(s.name)}</span><span>${s.score} pts</span></div>`).join('')}<button onclick="location.reload()">Nouveau quiz</button>`;
+        });
+    }
+
+    function joinGame() {
+        const code = document.getElementById('joinCode').value.trim();
+        const name = document.getElementById('playerName').value.trim();
+        if (!code || !name) { alert('Code et pseudo requis'); return; }
+        socket.emit('join_game', { gameCode: code, playerName: name });
+        socket.once('joined', (data) => {
+            currentRoom = data.gameCode;
+            document.getElementById('playerJoinArea').style.display = 'none';
+            document.getElementById('playerGameArea').style.display = 'block';
+            document.getElementById('gameStatus').innerHTML = `<div style="background:#00C853;padding:10px;border-radius:20px;">✅ Connecté - En attente...</div>`;
+        });
+        socket.on('error', (msg) => alert(msg));
+        socket.on('game_started', () => { document.getElementById('gameStatus').innerHTML = '<div style="background:#DC143C;padding:10px;border-radius:20px;">🎯 Quiz démarré !</div>'; });
+        socket.on('new_question', (data) => {
+            const html = `<div class="game-question"><h3>Question ${data.qIndex}/${data.total}</h3><h2>${escapeHtml(data.question)}</h2><div class="timer-bar"><div class="timer-fill" style="width:100%"></div></div><div class="options-grid" id="playerOpts"></div></div>`;
+            document.getElementById('questionArea').innerHTML = html;
+            const grid = document.getElementById('playerOpts');
+            data.options.forEach((opt, idx) => {
+                const btn = document.createElement('button');
+                btn.className = 'option-btn';
+                btn.innerText = `${String.fromCharCode(65+idx)}. ${escapeHtml(opt)}`;
+                btn.onclick = () => { socket.emit('submit_answer', { gameCode: currentRoom, answerIndex: idx }); grid.querySelectorAll('button').forEach(b => b.disabled = true); };
+                grid.appendChild(btn);
+            });
+            let time = data.timeLimit;
+            const fill = document.querySelector('.timer-fill');
+            const interval = setInterval(() => { time--; if (fill) fill.style.width = `${(time/data.timeLimit)*100}%`; if (time <= 0) { clearInterval(interval); grid.querySelectorAll('button').forEach(b => b.disabled = true); } }, 1000);
+        });
+        socket.on('answer_result', (data) => {
+            const fb = document.createElement('div');
+            fb.className = data.correct ? 'correct-feedback' : 'wrong-feedback';
+        fb.innerHTML = data.correct ? `✅ +${data.points} points !` : `❌ Mauvaise réponse. Bonne : ${data.correctAnswer}`;
+            document.getElementById('questionArea').appendChild(fb);
+            setTimeout(() => fb.remove(), 2000);
+        });
+        socket.on('players_update', (players) => {
+            document.getElementById('playerLeaderboard').innerHTML = '<h4>🏆 Classement</h4>' + players.map((p,i) => `<div class="player-item"><span>${i+1}. ${escapeHtml(p.name)}</span><span>${p.score} pts</span></div>`).join('');
+        });
+        socket.on('game_ended', (data) => {
+            document.getElementById('questionArea').innerHTML = `<h2>🎉 Quiz terminé !</h2>${data.scores.map(s => `<div class="player-item"><span>${escapeHtml(s.name)}</span><span>${s.score} pts</span></div>`).join('')}<button onclick="location.reload()">Rejouer</button>`;
+        });
+    }
+
+    function escapeHtml(str) { if (!str) return ''; return str.replace(/[&<>]/g, function(m) { if (m === '&') return '&amp;'; if (m === '<') return '&lt;'; if (m === '>') return '&gt;'; return m; }); }
+
+    document.getElementById('btnHostMode').onclick = () => { document.getElementById('hostPanel').style.display = 'block'; document.getElementById('playerPanel').style.display = 'none'; document.getElementById('btnHostMode').classList.add('active'); document.getElementById('btnPlayerMode').classList.remove('active'); renderQuizList(); };
+    document.getElementById('btnPlayerMode').onclick = () => { document.getElementById('hostPanel').style.display = 'none'; document.getElementById('playerPanel').style.display = 'block'; document.getElementById('btnPlayerMode').classList.add('active'); document.getElementById('btnHostMode').classList.remove('active'); document.getElementById('playerJoinArea').style.display = 'block'; document.getElementById('playerGameArea').style.display = 'none'; };
+    document.getElementById('quickCreateBtn').onclick = quickCreate;
+    document.getElementById('manualCreateBtn').onclick = openManualCreator;
+    document.getElementById('chatbotCreateBtn').onclick = openChatbot;
+    document.getElementById('joinRoomBtn').onclick = joinGame;
+    renderQuizList();
+</script>
+</body>
+</html>
